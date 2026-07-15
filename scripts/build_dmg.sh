@@ -25,8 +25,8 @@ hdiutil create \
     -format UDZO \
     "${DMG}"
 
-xattr -cr "${APP}"
-xattr -c "${APP}"
+xattr -d com.apple.FinderInfo "${APP}" 2>/dev/null || true
+xattr -d 'com.apple.fileprovider.fpfs#P' "${APP}" 2>/dev/null || true
 codesign --force --deep --sign - "${APP}"
 codesign --verify --deep --strict "${APP}"
 
