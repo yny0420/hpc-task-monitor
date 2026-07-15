@@ -60,6 +60,6 @@ The repository intentionally excludes connection settings, SSH configuration, jo
 
 ## License and copyright
 
-Copyright © 2026 HPC Task Monitor contributors.
+Copyright © 2026 Yang Yu.
 
 Released under the [MIT License](LICENSE). See [NOTICE](NOTICE) for the project copyright notice.
