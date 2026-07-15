@@ -25,4 +25,9 @@ hdiutil create \
     -format UDZO \
     "${DMG}"
 
+xattr -cr "${APP}"
+xattr -c "${APP}"
+codesign --force --deep --sign - "${APP}"
+codesign --verify --deep --strict "${APP}"
+
 echo "Built ${DMG}"
