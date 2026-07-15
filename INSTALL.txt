@@ -1,0 +1,32 @@
+HPC Task Monitor 2.3
+====================
+
+Requirements
+------------
+- macOS 14 or later (Apple silicon or Intel)
+- An SSH alias or host that already works in Terminal
+- SSH key-based authentication
+- Slurm commands (squeue and sacct) available on the login node
+
+Install
+-------
+1. Drag "HPC Task Monitor" to the Applications folder.
+2. Because this community build is not notarized, first launch it by
+   Control-clicking the app in Applications and choosing Open.
+3. Enter your SSH host or alias and your Slurm username.
+4. Leave SSH Port and SSH Username blank when they are already defined in
+   ~/.ssh/config.
+5. Click Save & Refresh.
+
+The app never asks for or stores an SSH password. It only runs read-only
+squeue, sacct and date commands when you manually refresh.
+
+Metadata
+--------
+Slurm cannot tell whether a job was submitted by Codex, Claude Code or you,
+nor can it know the scientific purpose of a job. Use "Open Metadata Table"
+to maintain those fields. Each Mac account keeps its own data in:
+
+~/Library/Application Support/HPC Task Monitor/
+
+This folder is not included in the DMG and is not shared with other users.

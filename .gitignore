@@ -1,0 +1,16 @@
+# Generated application packages and local runtime data
+HPC Task Monitor.app/
+dist/
+status/
+job_metadata.tsv
+.DS_Store
+__pycache__/
+
+# Local-only legacy terminal monitor
+run_monitor.command
+scripts/hpc_job_monitor.py
+tests/
+
+# Icon working files; only the final source PNG and ICNS are versioned
+assets/*-preview*.png
+assets/HPC-Task-Monitor-icon-source.png
