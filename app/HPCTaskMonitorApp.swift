@@ -17,8 +17,6 @@ struct Job: Codable, Identifiable, Hashable {
     let user: String
     let submitOrStart: String
     let runWait: String
-    let submitter: String
-    let submitterKey: String
     let purpose: String
     let project: String
     let projectPath: String
@@ -61,8 +59,6 @@ struct Job: Codable, Identifiable, Hashable {
         case user
         case submitOrStart = "submit_or_start"
         case runWait = "run_wait"
-        case submitter
-        case submitterKey = "submitter_key"
         case purpose
         case project
         case projectPath = "project_path"
@@ -106,15 +102,6 @@ struct Job: Codable, Identifiable, Hashable {
         case "cancelled": return "Cancelled"
         case "ended": return "Ended"
         default: return "Unknown"
-        }
-    }
-
-    var displaySubmitter: String {
-        switch submitterKey {
-        case "codex": return "Codex"
-        case "claude": return "Claude Code"
-        case "self": return "Self"
-        default: return "Unregistered"
         }
     }
 
@@ -193,6 +180,51 @@ enum TableMode: String, CaseIterable, Identifiable {
 }
 
 
+struct TagColor: Codable, Hashable {
+    var red: Double
+    var green: Double
+    var blue: Double
+
+    static let defaultBlue = TagColor(red: 0.20, green: 0.48, blue: 0.95)
+
+    init(red: Double, green: Double, blue: Double) {
+        self.red = red
+        self.green = green
+        self.blue = blue
+    }
+
+    init(_ color: Color) {
+        let value = NSColor(color).usingColorSpace(.sRGB) ?? .systemBlue
+        red = Double(value.redComponent)
+        green = Double(value.greenComponent)
+        blue = Double(value.blueComponent)
+    }
+
+    var swiftUIColor: Color { Color(red: red, green: green, blue: blue) }
+}
+
+
+struct TaskTag: Codable, Identifiable, Hashable {
+    var id = UUID()
+    var name: String
+    var color: TagColor
+}
+
+
+struct JobAnnotation: Codable, Hashable {
+    var isFocused = false
+    var tagIDs: [UUID] = []
+    var note: String?
+}
+
+
+enum SidebarSelection: Hashable {
+    case status(StatusFilter)
+    case focus
+    case tag(UUID)
+}
+
+
 final class MonitorStore: ObservableObject {
     @Published var jobs: [Job] = []
     @Published var fetchedAt = "Not refreshed"
@@ -200,6 +232,8 @@ final class MonitorStore: ObservableObject {
     @Published var isRefreshing = false
     @Published var errorMessage: String?
     @Published var settings: ConnectionSettings
+    @Published var tags: [TaskTag] = []
+    @Published private var annotations: [String: JobAnnotation] = [:]
 
     let rootURL: URL
     private var didInitialRefresh = false
@@ -216,11 +250,14 @@ final class MonitorStore: ObservableObject {
             settings = ConnectionSettings()
         }
         try? ensureStorage()
+        loadAnnotations()
         loadSnapshot()
     }
 
     var metadataURL: URL { rootURL.appendingPathComponent("job_metadata.tsv") }
     private var snapshotURL: URL { rootURL.appendingPathComponent("jobs.json") }
+    private var tagsURL: URL { rootURL.appendingPathComponent("task_tags.json") }
+    private var annotationsURL: URL { rootURL.appendingPathComponent("job_annotations.json") }
     var hasValidSettings: Bool { settings.isComplete }
 
     func initialRefresh() {
@@ -293,10 +330,83 @@ final class MonitorStore: ObservableObject {
         NSWorkspace.shared.open(metadataURL)
     }
 
+    func annotation(for jobID: String) -> JobAnnotation {
+        annotations[jobID] ?? JobAnnotation()
+    }
+
+    func note(for job: Job) -> String {
+        annotation(for: job.jobID).note ?? job.notes
+    }
+
+    func isFocused(_ job: Job) -> Bool {
+        annotation(for: job.jobID).isFocused
+    }
+
+    func tags(for job: Job) -> [TaskTag] {
+        let ids = Set(annotation(for: job.jobID).tagIDs)
+        return tags.filter { ids.contains($0.id) }
+    }
+
+    func toggleFocus(_ job: Job, enabled: Bool) {
+        updateAnnotation(job.jobID) { $0.isFocused = enabled }
+    }
+
+    func setTags(_ tagIDs: [UUID], for job: Job) {
+        updateAnnotation(job.jobID) { $0.tagIDs = tagIDs }
+    }
+
+    func setNote(_ note: String, for job: Job) {
+        updateAnnotation(job.jobID) { $0.note = note }
+    }
+
+    func addTag(name: String, color: TagColor) {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        tags.append(TaskTag(name: trimmed, color: color))
+        saveAnnotations()
+    }
+
+    func deleteTags(at offsets: IndexSet) {
+        let deleted = Set(offsets.map { tags[$0].id })
+        tags.remove(atOffsets: offsets)
+        for jobID in annotations.keys {
+            annotations[jobID]?.tagIDs.removeAll { deleted.contains($0) }
+        }
+        saveAnnotations()
+    }
+
+    func saveAnnotations() {
+        do {
+            try ensureStorage()
+            let encoder = JSONEncoder()
+            encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+            try encoder.encode(tags).write(to: tagsURL, options: .atomic)
+            try encoder.encode(annotations).write(to: annotationsURL, options: .atomic)
+        } catch {
+            errorMessage = "Could not save local task annotations: \(error.localizedDescription)"
+        }
+    }
+
+    private func updateAnnotation(_ jobID: String, update: (inout JobAnnotation) -> Void) {
+        var value = annotation(for: jobID)
+        update(&value)
+        annotations[jobID] = value
+        saveAnnotations()
+    }
+
+    private func loadAnnotations() {
+        if let data = try? Data(contentsOf: tagsURL), let saved = try? JSONDecoder().decode([TaskTag].self, from: data) {
+            tags = saved
+        }
+        if let data = try? Data(contentsOf: annotationsURL), let saved = try? JSONDecoder().decode([String: JobAnnotation].self, from: data) {
+            annotations = saved
+        }
+    }
+
     private func ensureStorage() throws {
         try FileManager.default.createDirectory(at: rootURL, withIntermediateDirectories: true)
         if !FileManager.default.fileExists(atPath: metadataURL.path) {
-            let header = "job_id\tsubmitter\tpurpose\tproject\tinput_path\toutput_path\tscript_path\tnotes\n"
+            let header = "job_id\tpurpose\tproject\tinput_path\toutput_path\tscript_path\tnotes\n"
             try header.write(to: metadataURL, atomically: true, encoding: .utf8)
         }
     }
@@ -304,12 +414,22 @@ final class MonitorStore: ObservableObject {
     private func appendMissingMetadataRows(for jobs: [Job]) throws {
         try ensureStorage()
         let existingText = try String(contentsOf: metadataURL, encoding: .utf8)
-        let existingIDs = Set(existingText.split(whereSeparator: \Character.isNewline).dropFirst().compactMap {
+        let lines = existingText.split(whereSeparator: \Character.isNewline).map(String.init)
+        let fields = lines.first?.split(separator: "\t", omittingEmptySubsequences: false).map(String.init) ?? []
+        let existingIDs = Set(lines.dropFirst().compactMap {
             $0.split(separator: "\t", omittingEmptySubsequences: false).first.map(String.init)
         })
         let newRows = jobs.filter { !existingIDs.contains($0.jobID) }.map { job in
-            [job.jobID, "", "", job.projectPath, "", "", job.scriptPath == "Unregistered" ? "" : job.scriptPath, ""]
-                .map(tsvValue).joined(separator: "\t")
+            let values = [
+                "job_id": job.jobID,
+                "purpose": "",
+                "project": job.projectPath,
+                "input_path": "",
+                "output_path": "",
+                "script_path": job.scriptPath == "Unregistered" ? "" : job.scriptPath,
+                "notes": ""
+            ]
+            return fields.map { tsvValue(values[$0] ?? "") }.joined(separator: "\t")
         }
         guard !newRows.isEmpty else { return }
         let handle = try FileHandle(forWritingTo: metadataURL)
@@ -402,6 +522,20 @@ struct StatusBadge: View {
 }
 
 
+struct TagBadge: View {
+    let tag: TaskTag
+
+    var body: some View {
+        Text(tag.name)
+            .font(.caption.weight(.medium))
+            .foregroundStyle(tag.color.swiftUIColor)
+            .padding(.horizontal, 7)
+            .padding(.vertical, 3)
+            .background(tag.color.swiftUIColor.opacity(0.14), in: Capsule())
+    }
+}
+
+
 struct DetailValue: View {
     let label: String
     let value: String
@@ -433,8 +567,70 @@ struct DetailValue: View {
 }
 
 
+struct TagManagerView: View {
+    @Environment(\.dismiss) private var dismiss
+    @ObservedObject var store: MonitorStore
+    @State private var newName = ""
+    @State private var newColor = TagColor.defaultBlue.swiftUIColor
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            VStack(alignment: .leading, spacing: 5) {
+                Text("Manage Tags")
+                    .font(.title2.weight(.semibold))
+                Text("Tags are local to this Mac account and automatically create task lists in the sidebar.")
+                    .foregroundStyle(.secondary)
+            }
+
+            HStack {
+                ColorPicker("Color", selection: $newColor, supportsOpacity: false)
+                    .labelsHidden()
+                TextField("New tag name", text: $newName)
+                Button("Add") {
+                    store.addTag(name: newName, color: TagColor(newColor))
+                    newName = ""
+                }
+                .disabled(newName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            }
+
+            List {
+                ForEach($store.tags) { $tag in
+                    HStack {
+                        ColorPicker("Color", selection: Binding(
+                            get: { tag.color.swiftUIColor },
+                            set: {
+                                tag.color = TagColor($0)
+                                store.saveAnnotations()
+                            }
+                        ), supportsOpacity: false)
+                        .labelsHidden()
+                        TextField("Tag name", text: $tag.name)
+                            .onChange(of: tag.name) { _, _ in store.saveAnnotations() }
+                    }
+                }
+                .onDelete(perform: store.deleteTags)
+            }
+            .frame(height: 240)
+
+            HStack {
+                Text("Deleting a tag removes it from tasks but keeps local notes and focus flags.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Button("Done") { dismiss() }
+                    .keyboardShortcut(.defaultAction)
+            }
+        }
+        .padding(24)
+        .frame(width: 520)
+    }
+}
+
+
 struct JobDetailView: View {
+    @ObservedObject var store: MonitorStore
     let job: Job
+    @State private var noteDraft = ""
 
     var body: some View {
         ScrollView {
@@ -450,12 +646,58 @@ struct JobDetailView: View {
                         .textSelection(.enabled)
                 }
 
+                GroupBox("Task Organization") {
+                    VStack(alignment: .leading, spacing: 12) {
+                        Toggle("Special Focus", isOn: Binding(
+                            get: { store.isFocused(job) },
+                            set: { store.toggleFocus(job, enabled: $0) }
+                        ))
+                        .toggleStyle(.checkbox)
+
+                        if store.tags.isEmpty {
+                            Text("Create tags from the sidebar to organize this task into custom lists.")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        } else {
+                            Text("Tags")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                            ForEach(store.tags) { tag in
+                                Toggle(isOn: Binding(
+                                    get: { store.annotation(for: job.jobID).tagIDs.contains(tag.id) },
+                                    set: { enabled in
+                                        var ids = store.annotation(for: job.jobID).tagIDs
+                                        if enabled { ids.append(tag.id) }
+                                        else { ids.removeAll { $0 == tag.id } }
+                                        store.setTags(Array(Set(ids)), for: job)
+                                    }
+                                )) {
+                                    TagBadge(tag: tag)
+                                }
+                                .toggleStyle(.checkbox)
+                            }
+                        }
+
+                        Text("Notes")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        TextEditor(text: $noteDraft)
+                            .font(.callout)
+                            .frame(minHeight: 80)
+                            .overlay {
+                                RoundedRectangle(cornerRadius: 5)
+                                    .stroke(.quaternary)
+                            }
+                            .onChange(of: noteDraft) { store.setNote(noteDraft, for: job) }
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(4)
+                }
+
                 GroupBox("Task Information") {
                     VStack(alignment: .leading, spacing: 14) {
-                        DetailValue(label: "Submitted By", value: job.displaySubmitter)
                         DetailValue(label: "Purpose", value: job.displayPurpose)
                         DetailValue(label: "Project", value: job.project)
-                        if !job.notes.isEmpty { DetailValue(label: "Notes", value: job.notes) }
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(4)
@@ -507,11 +749,14 @@ struct JobDetailView: View {
             .padding(20)
         }
         .background(Color(nsColor: .controlBackgroundColor))
+        .onAppear { noteDraft = store.note(for: job) }
+        .onChange(of: job.jobID) { _, _ in noteDraft = store.note(for: job) }
     }
 }
 
 
 struct JobTableView: View {
+    @ObservedObject var store: MonitorStore
     let jobs: [Job]
     @Binding var selectedJobID: String?
     @Binding var sortOrder: [KeyPathComparator<Job>]
@@ -529,8 +774,18 @@ struct JobTableView: View {
                     .width(min: 80, ideal: 92, max: 110)
                 TableColumn("Job Name", value: \.jobName)
                     .width(min: 145, ideal: 210)
-                TableColumn("Source", value: \.displaySubmitter)
-                    .width(min: 82, ideal: 105, max: 125)
+                TableColumn("Tags") { job in
+                    HStack(spacing: 4) {
+                        if store.isFocused(job) {
+                            Image(systemName: "star.fill")
+                                .foregroundStyle(.yellow)
+                        }
+                        ForEach(Array(store.tags(for: job).prefix(2))) { tag in
+                            TagBadge(tag: tag)
+                        }
+                    }
+                }
+                .width(min: 82, ideal: 130, max: 190)
                 TableColumn("Purpose", value: \.displayPurpose)
                     .width(min: 175, ideal: 260)
                 TableColumn("Project", value: \.project)
@@ -574,36 +829,39 @@ struct JobTableView: View {
 
 struct ContentView: View {
     @StateObject private var store = MonitorStore()
-    @State private var filter: StatusFilter = .all
+    @State private var selection: SidebarSelection = .status(.all)
     @State private var selectedJobID: String?
     @State private var searchText = ""
-    @State private var sourceFilter = "all"
     @State private var tableMode: TableMode = .overview
     @State private var showSettings = false
+    @State private var showTagManager = false
     @State private var showModeHelp = false
     @State private var sortOrder = [KeyPathComparator(\Job.submitOrStart, order: .reverse)]
 
-    private var sourceOptions: [(String, String)] {
-        var values: [(String, String)] = [("all", "All Sources")]
-        for key in ["codex", "claude", "self", "unknown"] {
-            if let job = store.jobs.first(where: { $0.submitterKey == key }) {
-                values.append((key, job.displaySubmitter))
-            }
+    private var activeTitle: String {
+        switch selection {
+        case .status(let filter): return filter.title
+        case .focus: return "Special Focus"
+        case .tag(let id): return store.tags.first(where: { $0.id == id })?.name ?? "Tag"
         }
-        return values
     }
 
     private var filteredJobs: [Job] {
         let matches = store.jobs.filter { job in
-            let statusMatches = filter == .all || job.filters.contains(filter.rawValue)
-            let sourceMatches = sourceFilter == "all" || job.submitterKey == sourceFilter
+            let listMatches: Bool
+            switch selection {
+            case .status(let filter): listMatches = filter == .all || job.filters.contains(filter.rawValue)
+            case .focus: listMatches = store.isFocused(job)
+            case .tag(let id): listMatches = store.annotation(for: job.jobID).tagIDs.contains(id)
+            }
             let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
             let searchable = [
-                job.jobID, job.jobName, job.displaySubmitter, job.displayPurpose, job.project,
+                job.jobID, job.jobName, job.displayPurpose, job.project,
                 job.user, job.partition, job.qos, job.arrayTasks, job.nodeOrReason,
-                job.projectPath, job.inputPath, job.outputPath, job.scriptPath, job.notes
+                job.projectPath, job.inputPath, job.outputPath, job.scriptPath,
+                store.note(for: job), store.tags(for: job).map(\.name).joined(separator: " ")
             ].joined(separator: " ").lowercased()
-            return statusMatches && sourceMatches && (query.isEmpty || searchable.contains(query))
+            return listMatches && (query.isEmpty || searchable.contains(query))
         }
         return matches.sorted(using: sortOrder)
     }
@@ -616,28 +874,44 @@ struct ContentView: View {
     var body: some View {
         NavigationSplitView {
             VStack(spacing: 0) {
-                List(StatusFilter.allCases, selection: $filter) { item in
-                    Label(item.title, systemImage: item.symbol)
-                        .badge(store.count(for: item))
-                        .tag(item)
+                List(selection: $selection) {
+                    Section("Job Status") {
+                        ForEach(StatusFilter.allCases) { item in
+                            Label(item.title, systemImage: item.symbol)
+                                .badge(store.count(for: item))
+                                .tag(SidebarSelection.status(item))
+                        }
+                    }
+                    Section("Task Lists") {
+                        Label("Special Focus", systemImage: "star.fill")
+                            .foregroundStyle(.yellow)
+                            .badge(store.jobs.filter { store.isFocused($0) }.count)
+                            .tag(SidebarSelection.focus)
+                        ForEach(store.tags) { tag in
+                            HStack(spacing: 8) {
+                                Circle()
+                                    .fill(tag.color.swiftUIColor)
+                                    .frame(width: 9, height: 9)
+                                Text(tag.name)
+                            }
+                            .badge(store.jobs.filter { store.annotation(for: $0.jobID).tagIDs.contains(tag.id) }.count)
+                            .tag(SidebarSelection.tag(tag.id))
+                        }
+                    }
                 }
                 Divider()
                 VStack(alignment: .leading, spacing: 8) {
-                    Text("Submission Source")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                    Picker("Submission Source", selection: $sourceFilter) {
-                        ForEach(sourceOptions, id: \.0) { key, label in
-                            Text(label).tag(key)
-                        }
+                    Button("Manage Tags", systemImage: "tag") {
+                        showTagManager = true
                     }
-                    .labelsHidden()
+                    .buttonStyle(.plain)
+                    .foregroundStyle(.tint)
                     Button("Open Metadata Table", systemImage: "tablecells") {
                         store.openMetadata()
                     }
                     .buttonStyle(.plain)
                     .foregroundStyle(.tint)
-                    Text("Local metadata: source, purpose and paths")
+                    Text("Local metadata: purpose and paths")
                         .font(.caption2)
                         .foregroundStyle(.secondary)
                 }
@@ -677,7 +951,7 @@ struct ContentView: View {
                                 .font(.headline)
                             Text("Overview")
                                 .fontWeight(.semibold)
-                            Text("Workflow context: status, submission source, purpose, project and basic timing.")
+                            Text("Workflow context: status, labels, purpose, project and basic timing.")
                                 .foregroundStyle(.secondary)
                             Text("Scheduler")
                                 .fontWeight(.semibold)
@@ -700,7 +974,7 @@ struct ContentView: View {
                 .padding(.vertical, 8)
                 .background(.bar)
 
-                JobTableView(jobs: filteredJobs, selectedJobID: $selectedJobID, sortOrder: $sortOrder, mode: tableMode)
+                JobTableView(store: store, jobs: filteredJobs, selectedJobID: $selectedJobID, sortOrder: $sortOrder, mode: tableMode)
                 .overlay {
                     if filteredJobs.isEmpty && !store.isRefreshing {
                         ContentUnavailableView("No Matching Jobs", systemImage: "tray")
@@ -718,7 +992,7 @@ struct ContentView: View {
                 .background(.bar)
             }
             .navigationSplitViewColumnWidth(min: 650, ideal: 780)
-            .navigationTitle(filter.title)
+            .navigationTitle(activeTitle)
             .searchable(text: $searchText, placement: .toolbar, prompt: "Search jobs or paths")
             .toolbar {
                 ToolbarItemGroup {
@@ -739,7 +1013,7 @@ struct ContentView: View {
             }
         } detail: {
             if let selectedJob {
-                JobDetailView(job: selectedJob)
+                JobDetailView(store: store, job: selectedJob)
                     .navigationSplitViewColumnWidth(min: 330, ideal: 410, max: 520)
             } else {
                 ContentUnavailableView("Select a Job", systemImage: "sidebar.right", description: Text("View its purpose, status, and file locations"))
@@ -754,6 +1028,9 @@ struct ContentView: View {
         }
         .sheet(isPresented: $showSettings) {
             ConnectionSettingsView(store: store)
+        }
+        .sheet(isPresented: $showTagManager) {
+            TagManagerView(store: store)
         }
     }
 }

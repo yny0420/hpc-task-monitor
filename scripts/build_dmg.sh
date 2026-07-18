@@ -4,7 +4,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 APP="${ROOT}/HPC Task Monitor.app"
 DIST="${ROOT}/dist"
-DMG="${DIST}/HPC-Task-Monitor-2.3-universal.dmg"
+DMG="${DIST}/HPC-Task-Monitor-2.4-universal.dmg"
 STAGE="$(mktemp -d /private/tmp/hpc-task-monitor-dmg.XXXXXX)"
 
 zsh "${ROOT}/scripts/build_app.sh"

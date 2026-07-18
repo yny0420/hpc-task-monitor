@@ -1,4 +1,4 @@
-HPC Task Monitor 2.3
+HPC Task Monitor 2.4
 ====================
 
 Requirements
@@ -23,9 +23,10 @@ squeue, sacct and date commands when you manually refresh.
 
 Metadata
 --------
-Slurm cannot tell whether a job was submitted by Codex, Claude Code or you,
-nor can it know the scientific purpose of a job. Use "Open Metadata Table"
-to maintain those fields. Each Mac account keeps its own data in:
+Slurm cannot know the scientific purpose of a job or the meaning of its file
+paths. Use "Open Metadata Table" for that context, and use "Manage Tags" to
+create color-coded task lists, special-focus jobs, and local notes. Each Mac
+account keeps its own data in:
 
 ~/Library/Application Support/HPC Task Monitor/
 

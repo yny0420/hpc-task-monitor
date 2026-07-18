@@ -277,7 +277,6 @@ enum SlurmBackend {
         let stateCounts = Dictionary(grouping: states, by: { $0 }).mapValues(\.count)
         let stateSummary = stateCounts.keys.sorted().map { "\($0) × \(stateCounts[$0]!)" }.joined(separator: " · ")
         let projectPath = clean(metadata["project"]) ?? chooseProjectPath(records)
-        let submitter = submitterLabel(metadata["submitter"])
         let rawStates = states
         let representative: String
         if hasError { representative = rawStates.first(where: errorStates.contains) ?? rawStates.first ?? "UNKNOWN" }
@@ -307,8 +306,6 @@ enum SlurmBackend {
             user: chooseValue(records, key: "user") ?? "-",
             submitOrStart: submitOrStart(records, hasRunning: hasRunning),
             runWait: runWait(records, hasRunning: hasRunning, hasPending: hasPending),
-            submitter: submitter.0,
-            submitterKey: submitter.1,
             purpose: clean(metadata["purpose"]) ?? "Unregistered",
             project: projectPath.isEmpty ? "Unidentified" : URL(fileURLWithPath: projectPath).lastPathComponent,
             projectPath: projectPath,
@@ -370,15 +367,6 @@ enum SlurmBackend {
             return url.deletingLastPathComponent().path
         }
         return url.pathExtension.isEmpty ? path : url.deletingLastPathComponent().path
-    }
-
-    private static func submitterLabel(_ value: String?) -> (String, String) {
-        switch (value ?? "").trimmingCharacters(in: .whitespacesAndNewlines).lowercased() {
-        case "codex", "openai codex": return ("Codex", "codex")
-        case "claude", "claude code", "claude-code": return ("Claude Code", "claude")
-        case "self", "me", "user": return ("Self", "self")
-        default: return ("Unregistered", "unknown")
-        }
     }
 
     private static func stateCode(_ state: String) -> String {

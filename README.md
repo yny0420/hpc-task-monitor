@@ -10,7 +10,7 @@ HPC Task Monitor is a native macOS application for a clear, manual view of your 
 - Two sortable views: **Overview** for context and **Scheduler** for Slurm resources
 - Scheduler details including priority, partition, QOS, nodes, CPU slots, GPUs, memory, arrays, and node/reason
 - Filters for all, running, pending, ended, success, error, and cancelled jobs
-- A local metadata table for recording whether a job was submitted by Codex, Claude Code, or yourself, plus its purpose and input/output/script paths
+- Locally defined, color-coded tags; a Special Focus list; and editable task notes
 
 `Success` means Slurm reported `COMPLETED` with exit code `0:0`; it is not a scientific validation of the output.
 
@@ -33,15 +33,17 @@ Leave SSH port and SSH username blank when they are already configured in `~/.ss
 
 ## Add job context
 
-Slurm does not know a job's scientific purpose or whether it was submitted by an assistant or directly by you. Choose **Open Metadata Table** in the app to edit the local TSV file. The relevant fields are:
+Slurm does not know a job's scientific purpose or the meaning of its input and output paths. Choose **Open Metadata Table** in the app to edit the local TSV file. The relevant fields are:
 
 | Field | Meaning |
 | --- | --- |
-| `submitter` | `codex`, `claude`, or `self` |
 | `purpose` | A short purpose statement |
 | `project` | Project label or directory |
 | `input_path`, `output_path`, `script_path` | Locations related to the job |
-| `notes` | Any additional context |
+
+## Organize tasks locally
+
+Choose **Manage Tags** in the sidebar to create tags with your own names and colors. Every tag automatically becomes a task list. Select a job to assign tags, mark it as **Special Focus**, and add a free-form note. Tags, focus flags, and notes stay in the current macOS account's application-support folder; they are not sent to the cluster.
 
 Each macOS account stores its settings, metadata, and local snapshot under `~/Library/Application Support/HPC Task Monitor/`. This local data is not packaged in the app or included in this repository.
 
